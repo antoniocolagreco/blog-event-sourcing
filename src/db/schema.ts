@@ -13,3 +13,6 @@ export const posts = pgTable('posts', {
 	archivedAt: timestamp('archived_at'),
 	updatedAt: timestamp('updated_at').defaultNow(),
 });
+
+export type Post = typeof posts.$inferSelect;
+export type InserPost = typeof posts.$inferInsert;

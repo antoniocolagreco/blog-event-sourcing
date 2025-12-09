@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "blog-event-sourcing",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}
