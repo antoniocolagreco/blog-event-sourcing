@@ -1,0 +1,16 @@
+{
+	"name": "blog-events-connector",
+	"config": {
+		"connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+		"database.hostname": "event-store",
+		"database.port": "5432",
+		"database.user": "postgres",
+		"database.password": "postgres",
+		"database.dbname": "blog_events",
+		"database.server.name": "blog",
+		"table.include.list": "public.events",
+		"plugin.name": "pgoutput",
+		"publication.autocreate.mode": "filtered",
+		"topic.prefix": "blog"
+	}
+}

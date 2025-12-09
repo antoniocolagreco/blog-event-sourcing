@@ -1,0 +1,177 @@
+# Docker Compose per Event Sourcing Blog
+# Stack: PostgreSQL + Kafka + Debezium per CDC (Change Data Capture)
+
+services:
+  # ============================================
+  # EVENT STORE - PostgreSQL
+  # ============================================
+  # Database principale che funge da event store
+  # Tutti gli eventi del sistema vengono salvati qui
+  event-store:
+    container_name: blog-event-store
+    image: postgres:latest
+    ports:
+      - "${EVENT_STORE_PORT}:5432" # Espone porta configurata su host → 5432 nel container
+    environment:
+      POSTGRES_USER: ${EVENT_STORE_USER}
+      POSTGRES_PASSWORD: ${EVENT_STORE_PASSWORD}
+      POSTGRES_DB: ${EVENT_STORE_DATABASE} # Database dedicato agli eventi
+    command: -c 'wal_level=logical' # Abilita logical replication per Debezium (CDC)
+    volumes:
+      - event-store-data:/var/lib/postgresql # Persiste i dati del DB
+      - ./sql/init-event-store.sql:/docker-entrypoint-initdb.d/init.sql # Script di init (crea tabella events)
+
+  # ============================================
+  # ZOOKEEPER
+  # ============================================
+  # Coordinatore distribuito richiesto da Kafka
+  # Gestisce metadata e leader election dei broker Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181 # Porta per connessioni client
+      ZOOKEEPER_TICK_TIME: 2000 # Unità di tempo base (ms) per heartbeat
+
+  # ============================================
+  # KAFKA
+  # ============================================
+  # Message broker per event streaming
+  # Riceve eventi da Debezium e li rende disponibili ai consumer
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092" # Porta per connessioni dall'HOST (tuo computer)
+      - "29092:29092" # Porta per connessioni INTERNE (altri container)
+    environment:
+      # ===== CONFIGURAZIONE BASE =====
+
+      KAFKA_BROKER_ID: 1
+      # Identificativo univoco del broker Kafka
+      # Se avessi un cluster con più broker, ognuno avrebbe ID diverso (1, 2, 3...)
+      # Nel tuo caso hai un solo broker
+
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Dove Kafka trova Zookeeper per coordinamento cluster
+      # "zookeeper" è il nome del servizio Docker (risolto dalla rete Docker)
+      # 2181 è la porta standard di Zookeeper
+
+      # ===== LISTENERS (dove Kafka ASCOLTA) =====
+
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      # Definisce su quali porte/interfacce Kafka ASCOLTA connessioni
+      # Sintassi: NOME_LISTENER://INTERFACCIA:PORTA
+      #
+      # PLAINTEXT://0.0.0.0:29092
+      #   - Nome: PLAINTEXT (listener per rete Docker interna)
+      #   - 0.0.0.0 = ascolta su TUTTE le interfacce di rete
+      #   - Porta 29092 (usata da Debezium e altri container)
+      #
+      # PLAINTEXT_HOST://0.0.0.0:9092
+      #   - Nome: PLAINTEXT_HOST (listener per host esterno)
+      #   - 0.0.0.0 = ascolta su tutte le interfacce
+      #   - Porta 9092 (usata da kcat sul tuo computer)
+
+      # ===== ADVERTISED LISTENERS (cosa Kafka DICE ai client) =====
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      # Quando un client si connette, Kafka risponde con QUESTI indirizzi
+      # Il client userà QUESTO indirizzo per le connessioni successive
+      #
+      # PLAINTEXT://kafka:29092
+      #   - I container Docker (Debezium) ricevono "kafka:29092"
+      #   - "kafka" è risolto dalla rete Docker interna
+      #   - Debezium riesce a connettersi
+      #
+      # PLAINTEXT_HOST://localhost:9092
+      #   - Il tuo computer riceve "localhost:9092"
+      #   - kcat riesce a connettersi
+      #
+      # PRIMA avevi solo PLAINTEXT://localhost:9092
+      # Quindi TUTTI (anche Debezium) ricevevano "localhost:9092"
+      # Ma Debezium dentro Docker NON può risolvere "localhost"!
+
+      # ===== SECURITY PROTOCOL MAP =====
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      # Mappa ogni NOME_LISTENER a un protocollo di sicurezza
+      # Sintassi: NOME_LISTENER:PROTOCOLLO
+      #
+      # PLAINTEXT:PLAINTEXT
+      #   - Il listener "PLAINTEXT" usa protocollo PLAINTEXT (no encryption)
+      #
+      # PLAINTEXT_HOST:PLAINTEXT
+      #   - Il listener "PLAINTEXT_HOST" usa protocollo PLAINTEXT
+      #
+      # Altri protocolli possibili: SSL, SASL_SSL, SASL_PLAINTEXT
+      # Nel tuo caso usi PLAINTEXT perché è sviluppo locale (no sicurezza)
+
+      # ===== INTER-BROKER COMMUNICATION =====
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Quale listener usare per comunicazione tra broker Kafka
+      # In un cluster con più broker, si parlano tra loro
+      # Nel tuo caso hai un solo broker, ma va specificato
+      # Usa il listener "PLAINTEXT" (quello sulla porta 29092)
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Quante repliche mantenere del topic interno __consumer_offsets
+      # __consumer_offsets tiene traccia di quali messaggi i consumer hanno già letto
+      # Replication factor 1 = nessuna replica (ok per sviluppo)
+      # In produzione si usa 3 per alta disponibilità
+
+  # ============================================
+  # DEBEZIUM CONNECT
+  # ============================================
+  # CDC (Change Data Capture) engine
+  # Monitora il WAL di PostgreSQL e pubblica ogni INSERT/UPDATE/DELETE su Kafka
+  # Implementa pattern Event Sourcing → ogni modifica al DB diventa un evento
+  debezium:
+    image: debezium/connect:2.3
+    depends_on:
+      - kafka
+      - event-store
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      # Indirizzo Kafka per la connessione iniziale
+      # "kafka" = nome servizio Docker (risolto dalla rete interna)
+      # 29092 = porta del listener PLAINTEXT (interno)
+      # Debezium riceverà "kafka:29092" come advertised listener
+      # E potrà connettersi correttamente!
+
+      GROUP_ID: 1
+      # Identificativo del gruppo di consumer Kafka
+      # Più istanze Debezium con stesso GROUP_ID collaborano
+
+      CONFIG_STORAGE_TOPIC: debezium_configs
+      # Topic Kafka dove Debezium salva le configurazioni dei connector
+
+      OFFSET_STORAGE_TOPIC: debezium_offsets
+      # Topic dove Debezium salva la posizione di lettura dal DB
+      # Se Debezium si riavvia, riprende da qui
+
+      STATUS_STORAGE_TOPIC: debezium_statuses
+      # Topic dove Debezium salva lo stato dei connector
+
+  read-model:
+    image: postgres:latest
+    ports: ["${READ_MODEL_PORT}:5432"]
+    environment:
+      POSTGRES_USER: ${READ_MODEL_USER}
+      POSTGRES_PASSWORD: ${READ_MODEL_PASSWORD}
+      POSTGRES_DB: ${READ_MODEL_DATABASE}
+    volumes:
+      - read-model-data:/var/lib/postgresql
+      - ./sql/init-read-model.sql:/docker-entrypoint-initdb.d/init.sql
+
+# ============================================
+# VOLUMES
+# ============================================
+# Named volume per persistenza dati PostgreSQL
+# Sopravvive a restart/rimozione container
+volumes:
+  event-store-data:
+  read-model-data:

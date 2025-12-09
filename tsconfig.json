@@ -1,6 +1,9 @@
 {
-  "extends": [
-    "@tsconfig/node-lts",
-    "@tsconfig/strictest"
-  ],
+	"extends": ["@tsconfig/node-lts", "@tsconfig/strictest"],
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"module": "ES2020",
+		"moduleResolution": "bundler"
+	}
 }
