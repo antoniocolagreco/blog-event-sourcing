@@ -1,0 +1,20 @@
+meta {
+  name: Publish Post
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://localhost:3000/api/posts/d3a0fa0a-3e25-49a8-9c7c-4694311f21ad/publish
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

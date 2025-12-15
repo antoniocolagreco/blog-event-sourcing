@@ -23,12 +23,12 @@ class EventRepository {
 			);
 
 			const currentVersion =
-				currentVersionResult.rows.at(0)?.currentVersion;
+				currentVersionResult.rows.at(0)?.currentversion;
 
 			let newVersion = 0;
 
-			if (!currentVersion) {
-				if (version) {
+			if (currentVersion === null || currentVersion === undefined) {
+				if (version !== undefined && version !== null) {
 					throw new Error(
 						'Cannot specify a version when creating a new stream.',
 					);
@@ -39,7 +39,7 @@ class EventRepository {
 						`Wrong version: expected ${currentVersion}, got ${version}`,
 					);
 				}
-				newVersion++;
+				newVersion = currentVersion + 1;
 			}
 
 			await client.query(

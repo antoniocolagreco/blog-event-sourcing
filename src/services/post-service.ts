@@ -17,8 +17,6 @@ export class PostService {
 	): Promise<PostId> {
 		const postId = generateId<PostId>();
 
-		console.log(input);
-
 		const event: PostCreatedEvent = {
 			type: 'PostCreated',
 			eventVersion: 1,

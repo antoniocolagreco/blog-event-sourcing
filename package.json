@@ -13,10 +13,8 @@
     "test": "vitest",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
-    "compose:drop": "docker compose down -v",
-    "compose:restart": "docker compose down && docker compose up",
-    "debezium:setup": "./scripts/init-debezium.sh",
-    "init": "pnpm run compose:drop && pnpm run compose:up && sleep 5 && pnpm run debezium:setup"
+    "compose:drop": "docker compose down -v && docker volume prune -f",
+    "debezium:setup": "./scripts/init-debezium.sh"
   },
   "keywords": [],
   "author": "Antonio Colagreco",
